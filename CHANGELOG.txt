@@ -1,3 +1,26 @@
+v0.3.6
+Added -ee and -ie options for excluding exterior and interior pixels from the 
+noise estimator.
+
+v0.3.5
+Updated masking procedure to prevent deconvolving into the noise.  
+
+v0.3.4
+Fixed a bug which prevented convergence in very bright fields. 
+
+v0.3.3
+Added a new option "--negcomp", "-nc" which turns on anticorrelation
+discovery in the source extraction step. This feature is provided as is
+and may cause odd behaviour.
+
+v0.3.2
+
+Minor update which fixes parser requirements and adds help PDF.
+
+v0.3.1
+
+Minor update to thresholding procedure to cope with negative flux scenarios.
+
 v0.3.0
 
 Restored GPU functionality.
