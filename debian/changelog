@@ -1,3 +1,11 @@
+pymoresane (0.3.0-1kern1) xenial; urgency=medium
+
+  * new upstream release
+  * first kern release
+  * add all dependencies 
+
+ -- Gijs Molenaar (launchpad ppa build key) <gijs@pythonic.nl>  Wed, 06 Jul 2016 11:57:20 +0000
+
 pymoresane (0.3.0-1trusty) trusty; urgency=medium
 
   * New upstream release
