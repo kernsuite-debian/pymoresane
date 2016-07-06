@@ -12,9 +12,42 @@ except:
     traceback.print_exc()
     print "Pycuda unavailable - GPU mode will fail."
 
-import pyfits
+import pylab as plt
 
-def threshold(in1, sigma_level=4):
+def estimate_threshold(in1, edge_excl=0, int_excl=0):
+    """
+    This function estimates the noise using the MAD estimator.
+
+    INPUTS:
+    in1             (no default):   The array from which the noise is estimated
+
+    OUTPUTS:
+    out1                            An array of per-scale noise estimates.
+    """
+
+    out1 = np.empty([in1.shape[0]])
+    mid = in1.shape[1]/2
+
+    if (edge_excl!=0) | (int_excl!=0):
+
+        if edge_excl!=0:
+            mask = np.zeros([in1.shape[1], in1.shape[2]])
+            mask[edge_excl:-edge_excl, edge_excl:-edge_excl] = 1
+        else:
+            mask = np.ones([in1.shape[1], in1.shape[2]])
+
+        if int_excl!=0:
+            mask[mid-int_excl:mid+int_excl, mid-int_excl:mid+int_excl] = 0
+
+    else:
+        mask = np.ones([in1.shape[1], in1.shape[2]])
+
+    for i in range(in1.shape[0]):
+        out1[i] = np.median(np.abs(in1[i,mask==1]))/0.6745
+
+    return out1
+
+def apply_threshold(in1, threshold, sigma_level=4):
     """
     This function performs the thresholding of the values in array in1 based on the estimated standard deviation
     given by the MAD (median absolute deviation) estimator about zero.
@@ -34,17 +67,15 @@ def threshold(in1, sigma_level=4):
     # discards all negative coefficients.
 
     if len(in1.shape)==2:
-        threshold_level = np.median(np.abs(in1[in1!=0]))/0.6745                     # MAD estimator for normal distribution.
-        out1 = (in1>(sigma_level*threshold_level))*in1
+        out1 = (np.abs(in1)>(sigma_level*threshold))*in1
     else:
         for i in range(in1.shape[0]):
-            threshold_level = np.median(np.abs(in1[i,in1[i,:,:]!=0]))/0.6745          # MAD estimator for normal
-            # distribution.
-            out1[i,:,:] = (in1[i,:,:]>(sigma_level*threshold_level))*in1[i,:,:]
+            out1[i,:,:] = (np.abs(in1[i,:,:])>(sigma_level*threshold[i]))*in1[i,:,:]
 
     return out1
 
-def source_extraction(in1, tolerance, mode="cpu", store_on_gpu=False):
+def source_extraction(in1, tolerance, mode="cpu", store_on_gpu=False,
+                      neg_comp=False):
     """
     Convenience function for allocating work to cpu or gpu, depending on the selected mode.
 
@@ -58,11 +89,12 @@ def source_extraction(in1, tolerance, mode="cpu", store_on_gpu=False):
     """
 
     if mode=="cpu":
-        return cpu_source_extraction(in1, tolerance)
+        return cpu_source_extraction(in1, tolerance, neg_comp)
     elif mode=="gpu":
-        return gpu_source_extraction(in1, tolerance, store_on_gpu)
+        return gpu_source_extraction(in1, tolerance, store_on_gpu, neg_comp)
 
-def cpu_source_extraction(in1, tolerance):
+
+def cpu_source_extraction(in1, tolerance, neg_comp):
     """
     The following function determines connectivity within a given wavelet decomposition. These connected and labelled
     structures are thresholded to within some tolerance of the maximum coefficient at the scale. This determines
@@ -91,16 +123,25 @@ def cpu_source_extraction(in1, tolerance):
     # calculated here.
 
     for i in range(in1.shape[0]):
-        scale_maxima[i] = np.max(in1[i,:,:])
+        if neg_comp:
+            scale_maxima[i] = np.max(abs(in1[i,:,:]))
+        else:
+            scale_maxima[i] = np.max(in1[i,:,:])
         objects[i,:,:], object_count[i] = ndimage.label(in1[i,:,:], structure=[[1,1,1],[1,1,1],[1,1,1]])
 
     # The following removes the insignificant objects and then extracts the remaining ones.
 
     for i in range(-1,-in1.shape[0]-1,-1):
-        if i==(-1):
-            tmp = (in1[i,:,:]>=(tolerance*scale_maxima[i]))*objects[i,:,:]
+        if neg_comp:
+            if i==(-1):
+                tmp = (abs(in1[i,:,:])>=(tolerance*scale_maxima[i]))*objects[i,:,:]
+            else:
+                tmp = (abs(in1[i,:,:])>=(tolerance*scale_maxima[i]))*objects[i,:,:]*objects[i+1,:,:]
         else:
-            tmp = (in1[i,:,:]>=(tolerance*scale_maxima[i]))*objects[i,:,:]*objects[i+1,:,:]
+            if i==(-1):
+                tmp = (in1[i,:,:]>=(tolerance*scale_maxima[i]))*objects[i,:,:]
+            else:
+                tmp = (in1[i,:,:]>=(tolerance*scale_maxima[i]))*objects[i,:,:]*objects[i+1,:,:]
 
         labels = np.unique(tmp[tmp>0])
 
@@ -112,7 +153,7 @@ def cpu_source_extraction(in1, tolerance):
 
     return objects*in1, objects
 
-def gpu_source_extraction(in1, tolerance, store_on_gpu):
+def gpu_source_extraction(in1, tolerance, store_on_gpu, neg_comp):
     """
     The following function determines connectivity within a given wavelet decomposition. These connected and labelled
     structures are thresholded to within some tolerance of the maximum coefficient at the scale. This determines
@@ -187,7 +228,10 @@ def gpu_source_extraction(in1, tolerance, store_on_gpu):
     # calculated here.
 
     for i in range(in1.shape[0]):
-        scale_maxima[i] = np.max(in1[i,:,:])
+        if neg_comp:
+            scale_maxima[i] = np.max(abs(in1[i,:,:]))
+        else:
+            scale_maxima[i] = np.max(in1[i,:,:])
         objects[i,:,:], object_count[i] = ndimage.label(in1[i,:,:], structure=[[1,1,1],[1,1,1],[1,1,1]])
 
     # The following bind the pycuda kernels to the expressions on the left.
@@ -209,10 +253,16 @@ def gpu_source_extraction(in1, tolerance, store_on_gpu):
 
         condition = tolerance*scale_maxima[i]
 
-        if i==(-1):
-            tmp = (in1[i,:,:]>=condition)*objects[i,:,:]
+        if neg_comp:
+            if i==(-1):
+                tmp = (abs(in1[i,:,:])>=condition)*objects[i,:,:]
+            else:
+                tmp = (abs(in1[i,:,:])>=condition)*objects[i,:,:]*objects[i+1,:,:]
         else:
-            tmp = (in1[i,:,:]>=condition)*objects[i,:,:]*objects[i+1,:,:]
+            if i==(-1):
+                tmp = (in1[i,:,:]>=condition)*objects[i,:,:]
+            else:
+                tmp = (in1[i,:,:]>=condition)*objects[i,:,:]*objects[i+1,:,:]
 
         labels = (np.unique(tmp[tmp>0])).astype(np.int32)
 

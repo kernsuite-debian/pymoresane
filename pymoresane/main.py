@@ -8,6 +8,8 @@ import pymoresane.parser as pparser
 from pymoresane.beam_fit import beam_fit
 import time
 
+from scipy.signal import fftconvolve
+import pylab as plt
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,8 @@ class FitsImage:
             self.mask = pyfits.open("{}".format(mask_name))[0].data
             self.mask = self.mask.reshape(self.mask.shape[-2], self.mask.shape[-1])
             self.mask = self.mask/np.max(self.mask)
+            self.mask = fftconvolve(self.mask,np.ones([5,5]),mode="same")
+            self.mask = self.mask/np.max(self.mask)
 
         self.dirty_data_shape = self.dirty_data.shape
         self.psf_data_shape = self.psf_data.shape
@@ -64,7 +68,8 @@ class FitsImage:
     def moresane(self, subregion=None, scale_count=None, sigma_level=4, loop_gain=0.1, tolerance=0.75, accuracy=1e-6,
                  major_loop_miter=100, minor_loop_miter=30, all_on_gpu=False, decom_mode="ser", core_count=1,
                  conv_device='cpu', conv_mode='linear', extraction_mode='cpu', enforce_positivity=False,
-                 edge_suppression=False, edge_offset=0, flux_threshold=0):
+                 edge_suppression=False, edge_offset=0, flux_threshold=0,
+                 neg_comp=False, edge_excl=0, int_excl=0):
         """
         Primary method for wavelet analysis and subsequent deconvolution.
 
@@ -131,10 +136,7 @@ class FitsImage:
         subregion_slice = tuple([slice(self.dirty_data_shape[0]/2-subregion/2, self.dirty_data_shape[0]/2+subregion/2),
                                  slice(self.dirty_data_shape[1]/2-subregion/2, self.dirty_data_shape[1]/2+subregion/2)])
 
-        if self.mask_name is None:
-            dirty_subregion = self.dirty_data[subregion_slice]
-        else:
-            dirty_subregion = self.dirty_data[subregion_slice]*self.mask[subregion_slice]
+        dirty_subregion = self.dirty_data[subregion_slice]
 
         if np.all(np.array(self.psf_data_shape)==2*np.array(self.dirty_data_shape)):
             psf_subregion = self.psf_data[self.psf_data_shape[0]/2-subregion/2:self.psf_data_shape[0]/2+subregion/2,
@@ -250,7 +252,7 @@ class FitsImage:
 
         model = np.zeros_like(self.dirty_data)
 
-        std_current = 1
+        std_current = 1000
         std_last = 1
         std_ratio = 1
 
@@ -290,7 +292,15 @@ class FitsImage:
 
                 if min_scale==0:
                     dirty_decomposition = iuwt.iuwt_decomposition(dirty_subregion, scale_count, 0, decom_mode, core_count)
-                    dirty_decomposition_thresh = tools.threshold(dirty_decomposition, sigma_level=sigma_level)
+
+                    thresholds = tools.estimate_threshold(dirty_decomposition, edge_excl, int_excl)
+
+                    if self.mask_name is not None:
+                        dirty_decomposition = iuwt.iuwt_decomposition(dirty_subregion*self.mask[subregion_slice], scale_count, 0,
+                            decom_mode, core_count)
+
+                    dirty_decomposition_thresh = tools.apply_threshold(dirty_decomposition, thresholds,
+                        sigma_level=sigma_level)
 
                     # If edge_supression is desired, the following simply masks out the offending wavelet coefficients.
 
@@ -350,7 +360,15 @@ class FitsImage:
                 # maximum  at that scale.
 
                 extracted_sources, extracted_sources_mask = \
-                    tools.source_extraction(thresh_slice, tolerance, mode=extraction_mode, store_on_gpu=all_on_gpu)
+                    tools.source_extraction(thresh_slice, tolerance,
+                    mode=extraction_mode, store_on_gpu=all_on_gpu,
+                    neg_comp=neg_comp)
+
+                # for blah in range(extracted_sources.shape[0]):
+                #
+                #     plt.imshow(extracted_sources[blah,:,:],
+                #     interpolation="none")
+                #     plt.show()
 
                 # The wavelet coefficients of the extracted sources are recomposed into a single image,
                 # which should contain only the structures of interest.
@@ -475,6 +493,8 @@ class FitsImage:
 
             if max_coeff>0:
 
+                # x[abs(x)<0.8*np.max(np.abs(x))] = 0
+
                 model[subregion_slice] += loop_gain*x
 
                 residual = self.dirty_data - conv.fft_convolve(model, psf_data_fft, conv_device, conv_mode)
@@ -482,7 +502,7 @@ class FitsImage:
                 # The following assesses whether or not the residual has improved.
 
                 std_last = std_current
-                std_current = np.std(residual)
+                std_current = np.std(residual[subregion_slice])
                 std_ratio = (std_last-std_current)/std_last
 
                 # If the most recent deconvolution step is poor, the following reverts the changes so that the
@@ -495,10 +515,7 @@ class FitsImage:
 
                 # The current residual becomes the dirty image for the subsequent iteration.
 
-                if self.mask_name is None:
-                    dirty_subregion = residual[subregion_slice]
-                else:
-                    dirty_subregion = residual[subregion_slice]*self.mask[subregion_slice]
+                dirty_subregion = residual[subregion_slice]
 
                 major_loop_niter += 1
                 logger.info("{} major loop iterations performed.".format(major_loop_niter))
@@ -521,7 +538,8 @@ class FitsImage:
     def moresane_by_scale(self, start_scale=1, stop_scale=20, subregion=None, sigma_level=4, loop_gain=0.1,
                           tolerance=0.75, accuracy=1e-6, major_loop_miter=100, minor_loop_miter=30, all_on_gpu=False,
                           decom_mode="ser", core_count=1, conv_device='cpu', conv_mode='linear', extraction_mode='cpu',
-                          enforce_positivity=False, edge_suppression=False, edge_offset=0, flux_threshold=0):
+                          enforce_positivity=False, edge_suppression=False,
+                          edge_offset=0, flux_threshold=0, neg_comp=False, edge_excl=0, int_excl=0):
         """
         Extension of the MORESANE algorithm. This takes a scale-by-scale approach, attempting to remove all sources
         at the lower scales before moving onto the higher ones. At each step the algorithm may return to previous
@@ -574,7 +592,9 @@ class FitsImage:
                           minor_loop_miter=minor_loop_miter, all_on_gpu=all_on_gpu, decom_mode=decom_mode,
                           core_count=core_count, conv_device=conv_device, conv_mode=conv_mode,
                           extraction_mode=extraction_mode, enforce_positivity=enforce_positivity,
-                          edge_suppression=edge_suppression, edge_offset=edge_offset, flux_threshold=flux_threshold)
+                          edge_suppression=edge_suppression, edge_offset=edge_offset,
+                          flux_threshold=flux_threshold, neg_comp=neg_comp,
+                          edge_excl=edge_excl, int_excl=int_excl)
 
             self.dirty_data = self.residual
 
@@ -674,7 +694,12 @@ class FitsImage:
 
 
 def main():
+    
     args = pparser.handle_parser()
+
+    if (args.outputname is None):
+        if (args.residualname is None)|(args.restoredname is None)|(args.modelname is None):
+            raise ValueError("If outputname is unspecified, residualname, restoredname and modelname must be present.")
 
     data = FitsImage(args.dirty, args.psf, args.mask)
 
@@ -687,12 +712,16 @@ def main():
         data.moresane(args.subregion, args.scalecount, args.sigmalevel, args.loopgain, args.tolerance, args.accuracy,
                       args.majorloopmiter, args.minorloopmiter, args.allongpu, args.decommode, args.corecount,
                       args.convdevice, args.convmode, args.extractionmode, args.enforcepositivity,
-                      args.edgesuppression, args.edgeoffset, args.fluxthreshold)
+                      args.edgesuppression, args.edgeoffset,
+                      args.fluxthreshold, args.negcomp, args.edgeexcl,
+                      args.intexcl)
     else:
         data.moresane_by_scale(args.startscale, args.stopscale, args.subregion, args.sigmalevel, args.loopgain,
                                args.tolerance, args.accuracy, args.majorloopmiter, args.minorloopmiter, args.allongpu,
                                args.decommode,  args.corecount, args.convdevice, args.convmode, args.extractionmode,
-                               args.enforcepositivity, args.edgesuppression, args.edgeoffset, args.fluxthreshold)
+                               args.enforcepositivity, args.edgesuppression,
+                               args.edgeoffset, args.fluxthreshold,
+                               args.negcomp, args.edgeexcl, args.intexcl)
 
     end_time = time.time()
     logger.info("Elapsed time was %s." % (time.strftime('%H:%M:%S', time.gmtime(end_time - start_time))))
