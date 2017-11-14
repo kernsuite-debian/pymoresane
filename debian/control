@@ -1,16 +1,24 @@
 Source: pymoresane
-Section: science
+Section: python
 Priority: optional
-Maintainer: Gijs Molenaar <gijs@pythonic.nl>
-Build-Depends: debhelper (>= 8.0.0), python-all
-Standards-Version: 3.9.4
+Maintainer: KERN packaging <packaging@kernsuite.info>
+Build-Depends: debhelper (>= 9.0.0), python-all
+Standards-Version: 3.9.7
 Homepage: https://github.com/ratt-ru/PyMORESANE
 X-Python-Version: 2.7
 
 Package: python-pymoresane
 Architecture: any
-Depends: ${python:Depends}, python-scipy, python-numpy, python-pycuda,
- python-pyfits, python-matplotlib
+Depends: ${misc:Depends}, python-scipy, python-numpy, python-pyfits,
+ python-matplotlib
+Suggests: python-pycuda
 Description: Python version of the MORESANE deconvolution algorithm
+ This is a Python and pyCUDA-accelerated implementation of the MORESANE
+ deconvolution algorithm.
+
+Package: pymoresane
+Architecture: any
+Depends: ${misc:Depends}, python-pymoresane
+Description: Meta package for pymoresane
  This is a Python and pyCUDA-accelerated implementation of the MORESANE
  deconvolution algorithm.

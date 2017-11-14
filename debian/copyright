@@ -1,9 +1,9 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: pymoresane
-Source: <url://example.com>
+Source: https://github.com/ratt-ru/PyMORESANE
 
 Files: *
-Copyright: <years> <put author's name and email here>
+Copyright: 2017 jonosken@gmail.com
 License: GPL-2.0+
 
 Files: debian/*
