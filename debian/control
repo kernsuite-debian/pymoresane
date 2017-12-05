@@ -18,7 +18,7 @@ Description: Python version of the MORESANE deconvolution algorithm
 
 Package: pymoresane
 Architecture: any
-Depends: ${misc:Depends}, python-pymoresane
+Depends: ${misc:Depends}, python-pymoresane, python
 Description: Meta package for pymoresane
  This is a Python and pyCUDA-accelerated implementation of the MORESANE
  deconvolution algorithm.

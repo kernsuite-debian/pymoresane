@@ -1,3 +1,9 @@
+pymoresane (0.3.6-1kern3) xenial; urgency=medium
+
+  * actually install the files
+
+ -- KERN packaging <packaging@kernsuite.info>  Tue, 05 Dec 2017 15:37:00 +0200
+
 pymoresane (0.3.6-1kern2) xenial; urgency=medium
 
   * Make pycuda an optional dependency
