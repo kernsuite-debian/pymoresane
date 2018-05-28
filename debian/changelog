@@ -1,3 +1,9 @@
+pymoresane (0.3.6.1-1kern1) bionic; urgency=medium
+
+  * New upstream version 0.3.6.1
+
+ -- KERN packaging <packaging@kernsuite.info>  Mon, 28 May 2018 08:42:52 +0000
+
 pymoresane (0.3.6-1kern4) bionic; urgency=medium
 
   * Make new upstream release for bionic
